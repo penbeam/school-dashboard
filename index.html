@@ -1840,7 +1840,7 @@
                 // CONFIGURATION - UPDATE THESE VALUES!
                 // ============================================
                 API_URL: 'https://script.google.com/macros/s/AKfycbzH62NNSh1M1fiRuqy5sL5uVNdWerH1-Z7-SlU5Exw19FhPWpc0E4yDhgTcymtaoCFbOw/exec',
-                API_KEY: 'ess_i7xt8rt36w9n4e0oe2tldp',
+                API_KEY: 'ess_bnst8mhz846pxv36z6mlr',
                 
                 // State
                 sidebarCollapsed: false,
@@ -1979,39 +1979,62 @@
                 // API CALLS - FIXED FOR CORS
                 // ============================================
                 async apiCall(action, params = {}) {
-                    try {
-                        // Build URL with parameters (NO CUSTOM HEADERS!)
-                        const url = new URL(this.API_URL);
-                        url.searchParams.append('apiKey', this.API_KEY);
-                        url.searchParams.append('action', action);
-                        url.searchParams.append('params', JSON.stringify(params));
-                        
-                        const response = await fetch(url.toString(), {
-                            method: 'GET',
-                            mode: 'cors',
-                            cache: 'no-cache'
-                        });
+    try {
+        // Add timestamp to prevent caching
+        const url = new URL(this.API_URL);
+        url.searchParams.append('apiKey', this.API_KEY);
+        url.searchParams.append('action', action);
+        url.searchParams.append('params', JSON.stringify(params));
+        url.searchParams.append('_', Date.now()); // Cache buster
+        
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            mode: 'cors',
+            cache: 'no-cache'
+        });
 
-                        const data = await response.json();
-                        
-                        if (!data.success) {
-                            console.error('API Error:', data);
-                            if (data.code === 'AUTH_ERROR') {
-                                this.showToast('error', 'Authentication Error', 'Invalid API key. Check your configuration.');
-                            } else if (data.code === 'RATE_LIMIT') {
-                                this.showToast('warning', 'Rate Limit', 'Too many requests. Please wait a moment.');
-                            } else {
-                                this.showToast('error', 'Error', data.message || 'API call failed');
-                            }
-                        }
-                        
-                        return data;
-                    } catch (error) {
-                        console.error('Network Error:', error);
-                        this.showToast('error', 'Connection Error', 'Cannot connect to server. Check your API URL.');
-                        return { success: false, error: error.toString() };
-                    }
-                },
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            console.error('API Error:', data);
+            if (data.code === 'AUTH_ERROR') {
+                this.showToast('error', 'Authentication Error', 'Invalid API key. Check your configuration.');
+            } else {
+                this.showToast('error', 'Error', data.message || 'API call failed');
+            }
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('Network Error:', error);
+        this.showToast('error', 'Connection Error', 'Cannot connect to server. Check your API URL.');
+        return { success: false, error: error.toString() };
+    }
+},
+
+                // ============================================
+// FIXED: LOAD STUDENTS WITH STATUS-SPECIFIC CALLS
+// ============================================
+async loadStudentsByStatus(status) {
+    try {
+        const result = await this.apiCall('getStudentsByStatus', { 
+            status: status,
+            search: this.tableSearch 
+        });
+        
+        if (result.success && result.data) {
+            return result.data.students || [];
+        }
+        return [];
+    } catch (error) {
+        console.error('Error loading students by status:', error);
+        return [];
+    }
+},
 
                 async testConnection() {
                     const result = await this.apiCall('testConnection');
@@ -2062,28 +2085,84 @@
                     }
                 },
 
-                async loadDashboardData() {
-                    try {
-                        // Load stats
-                        const statsResult = await this.apiCall('getStats');
-                        if (statsResult.success && statsResult.data) {
-                            this.stats = { ...this.stats, ...statsResult.data.stats };
-                            
-                            // Update charts with real data
-                            this.updateChartsWithData();
-                        }
-                        
-                        // Load students
-                        const studentsResult = await this.apiCall('getStudents', { limit: 100 });
-                        if (studentsResult.success && studentsResult.data) {
-                            this.students = studentsResult.data.students;
-                            this.allStudents = studentsResult.data.students;
-                        }
-                        
-                    } catch (error) {
-                        console.error('Failed to load dashboard data:', error);
-                    }
-                },
+                // ============================================
+// FIXED: LOAD DASHBOARD DATA WITH PROPER ERROR HANDLING
+// ============================================
+async loadDashboardData() {
+    this.loading = true;
+    
+    try {
+        // Load stats first
+        const statsResult = await this.apiCall('getStats');
+        if (statsResult.success && statsResult.data) {
+            this.stats = { ...this.stats, ...statsResult.data.stats };
+        }
+        
+        // Then load all students
+        const studentsResult = await this.apiCall('getStudents', { limit: 500 });
+        if (studentsResult.success && studentsResult.data) {
+            // Ensure each student has a valid regId and all required fields
+            this.students = (studentsResult.data.students || []).map(s => ({
+                ...s,
+                regId: s.regId || `temp_${Math.random()}`,
+                fullName: s.fullName || 'Unknown',
+                status: s.status || 'New',
+                classApplied: s.classApplied || 'Not Specified'
+            }));
+        }
+        
+        // Update charts with real data
+        if (this.chartsInitialized) {
+            this.updateChartsWithData();
+        }
+        
+    } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+        this.showToast('error', 'Data Error', 'Failed to load some data');
+    } finally {
+        this.loading = false;
+    }
+},
+
+                // ============================================
+// FIXED: NAVIGATE TO PAGE WITH STATUS LOADING
+// ============================================
+async navigateTo(page, event) {
+    if (event) event.preventDefault();
+    this.currentPage = page;
+    
+    // Update page title
+    const findTitle = (items) => {
+        for (const item of items) {
+            if (item.id === page) return item.label;
+            if (item.children) {
+                for (const child of item.children) {
+                    if (child.id === page) return child.label;
+                }
+            }
+        }
+        return page.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    };
+    
+    this.currentPageTitle = findTitle(this.menuItems);
+    
+    // Close mobile menu
+    this.mobileMenuOpen = false;
+    
+    // Load page-specific data
+    if (page === 'cards-recent') {
+        await this.loadRecentCards();
+    } else if (page === 'cards-archive') {
+        await this.loadArchiveContents();
+    } else if (page.startsWith('students-')) {
+        // Extract status from page name
+        const status = page.replace('students-', '');
+        if (status !== 'all') {
+            // Could load filtered data directly from API for better performance
+            console.log('Viewing status:', status);
+        }
+    }
+},
 
                 async loadSettings() {
                     // Load school info
@@ -2379,30 +2458,50 @@
                     ).slice(0, 5);
                 },
 
-                get filteredStudentsByStatus() {
-                    let filtered = this.students;
-                    
-                    switch(this.currentPage) {
-                        case 'students-approved':
-                            filtered = filtered.filter(s => s.status === 'Approved');
-                            break;
-                        case 'students-pending':
-                            filtered = filtered.filter(s => s.status === 'Pending');
-                            break;
-                        case 'students-new':
-                            filtered = filtered.filter(s => s.status === 'New');
-                            break;
-                    }
-                    
-                    if (this.tableSearch) {
-                        filtered = filtered.filter(s => 
-                            s.fullName.toLowerCase().includes(this.tableSearch.toLowerCase()) ||
-                            s.regId.toLowerCase().includes(this.tableSearch.toLowerCase())
-                        );
-                    }
-                    
-                    return filtered;
-                },
+                // ============================================
+// FIXED: GET FILTERED STUDENTS BY STATUS
+// ============================================
+get filteredStudentsByStatus() {
+    // Return empty array if students not loaded yet
+    if (!this.students || !Array.isArray(this.students)) {
+        return [];
+    }
+    
+    let filtered = this.students;
+    
+    // Apply status filter based on current page
+    switch(this.currentPage) {
+        case 'students-approved':
+            filtered = filtered.filter(s => s && s.status === 'Approved');
+            break;
+        case 'students-pending':
+            filtered = filtered.filter(s => s && s.status === 'Pending');
+            break;
+        case 'students-new':
+            filtered = filtered.filter(s => s && s.status === 'New');
+            break;
+        case 'students-rejected':
+            filtered = filtered.filter(s => s && s.status === 'Rejected');
+            break;
+        case 'students-all':
+        default:
+            // No filter, show all
+            break;
+    }
+    
+    // Apply search filter
+    if (this.tableSearch && this.tableSearch.trim() !== '') {
+        const searchLower = this.tableSearch.toLowerCase().trim();
+        filtered = filtered.filter(s => 
+            s && (
+                (s.fullName && s.fullName.toLowerCase().includes(searchLower)) ||
+                (s.regId && s.regId.toLowerCase().includes(searchLower))
+            )
+        );
+    }
+    
+    return filtered;
+},
 
                 toggleAll() {
                     if (this.selectAll) {
