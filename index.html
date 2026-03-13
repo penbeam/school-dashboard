@@ -1840,7 +1840,7 @@
                 // CONFIGURATION - UPDATE THESE VALUES!
                 // ============================================
                 API_URL: 'https://script.google.com/macros/s/AKfycbzH62NNSh1M1fiRuqy5sL5uVNdWerH1-Z7-SlU5Exw19FhPWpc0E4yDhgTcymtaoCFbOw/exec',  // ← PASTE YOUR WEB APP URL HERE
-                API_KEY: 'ess_q7h4zhh35yj6bmo7jelfl',            // ← PASTE YOUR API KEY HERE
+                API_KEY: 'ess_q1ngdlqg65gi1bqztonr7b',            // ← PASTE YOUR API KEY HERE
                 
                 // State
                 sidebarCollapsed: false,
@@ -1963,42 +1963,39 @@
                 // API CALLS
                 // ============================================
                 async apiCall(action, params = {}) {
-                    try {
-                        const response = await fetch(this.API_URL, {
-                            method: 'POST',
-                            mode: 'cors',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-API-Key': this.API_KEY
-                            },
-                            body: JSON.stringify({
-                                action: action,
-                                apiKey: this.API_KEY,
-                                params: params,
-                                timestamp: Date.now()
-                            })
-                        });
+    try {
+        // Build URL with parameters (NO CUSTOM HEADERS!)
+        const url = new URL(this.API_URL);
+        url.searchParams.append('apiKey', this.API_KEY);
+        url.searchParams.append('action', action);
+        url.searchParams.append('params', JSON.stringify(params));
+        
+        const response = await fetch(url.toString(), {
+            method: 'GET', // Use GET instead of POST to avoid preflight
+            mode: 'cors',
+            cache: 'no-cache'
+        });
 
-                        const data = await response.json();
-                        
-                        if (!data.success) {
-                            console.error('API Error:', data);
-                            if (data.code === 'AUTH_ERROR') {
-                                this.showToast('error', 'Authentication Error', 'Invalid API key. Check your configuration.');
-                            } else if (data.code === 'RATE_LIMIT') {
-                                this.showToast('warning', 'Rate Limit', 'Too many requests. Please wait a moment.');
-                            } else {
-                                this.showToast('error', 'Error', data.message || 'API call failed');
-                            }
-                        }
-                        
-                        return data;
-                    } catch (error) {
-                        console.error('Network Error:', error);
-                        this.showToast('error', 'Connection Error', 'Cannot connect to server. Check your API URL.');
-                        return { success: false, error: error.toString() };
-                    }
-                },
+        const data = await response.json();
+        
+        if (!data.success) {
+            console.error('API Error:', data);
+            if (data.code === 'AUTH_ERROR') {
+                this.showToast('error', 'Authentication Error', 'Invalid API key. Check your configuration.');
+            } else if (data.code === 'RATE_LIMIT') {
+                this.showToast('warning', 'Rate Limit', 'Too many requests. Please wait a moment.');
+            } else {
+                this.showToast('error', 'Error', data.message || 'API call failed');
+            }
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('Network Error:', error);
+        this.showToast('error', 'Connection Error', 'Cannot connect to server. Check your API URL.');
+        return { success: false, error: error.toString() };
+    }
+},
 
                 async testConnection() {
                     const result = await this.apiCall('testConnection');
